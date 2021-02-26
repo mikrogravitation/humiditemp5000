@@ -1,0 +1,13 @@
+Flash micropython: (see also here: http://docs.micropython.org/en/latest/esp32/tutorial/intro.html#esp32-intro)
+
+ - download esp32-idf4-20210202-v1.14.bin from https://micropython.org/download/esp32/
+ - install esptool (via pip or from https://github.com/espressif/esptool.git)
+ - connect esp32 with computer
+ - find out which device the esp32 is (/dev/ttyUSB0, 1, 2, 3, etc. or /dev/ttyACM0, 1, 2, 3, etc.)
+ - flash the firmware: esptool.py --chip esp32 --port /dev/tty[insert correct name here] write_flash -z 0x1000 ~/Downloads/esp32-idf4-20210202-v1.14.bin
+
+Load the firmware:
+
+ - install ampy (pip install adafruit-ampy)
+ - copy boot.py: ampy --port /dev/tty[...] --baud 115200 put boot.py
+ - copy wifi_secrets.py: ampy --port /dev/tty[...] --baud 115200 put wifi_secrets.py
