@@ -19,7 +19,7 @@ listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 listener.bind(("0.0.0.0", 5000))
 listener.listen(1)
 
-sensor = dht.DHT22(machine.Pin(4))
+sensor = dht.DHT22(machine.Pin(15))
 
 while True:
     connection, peer = listener.accept()
