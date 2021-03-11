@@ -3,8 +3,41 @@ import network
 import wifi_secrets
 import machine
 import dht
+import bme280_float
 import uos
 import gc
+import time
+
+def make_response_section(name, label, description, sensor_type, value):
+
+    return """
+{0}{{label="{1}", description="{2}", type="{3}"}} {4:.3f}""".format(name, label, description, sensor_type, value)
+
+sensor_configs = {
+    "dht": {"type": "dht", "port": machine.Pin(15), "description": "DHT22"},
+    "bme": {"type": "bme", "port": machine.I2C(0), "description": "BME280"}
+}
+
+# extra 3.3v pin (for connecting two sensors at once)
+machine.Pin(13, machine.Pin.OUT).on()
+
+# wait for dht sensor to stabilize
+time.sleep(2)
+
+# initialize sensor objects
+sensors = {}
+for sensor_label, config in sensor_configs.items():
+    if config["type"] == "dht":
+        sensors[sensor_label] = dht.DHT22(config["port"])
+    
+    elif config["type"] == "bme":
+        sensors[sensor_label] = bme280_float.BME280(
+            i2c=config["port"],
+            filter_value=bme280_float.BME280_FILTER_OFF,
+            pressure_oversampling=bme280_float.BME280_OSAMPLE_8,
+            temperature_oversampling=bme280_float.BME280_OSAMPLE_1,
+            humidity_oversampling=bme280_float.BME280_OSAMPLE_1
+        )
 
 wlan = network.WLAN(network.STA_IF)
 wlan.active(True)
@@ -20,8 +53,6 @@ listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 listener.bind(("0.0.0.0", 5000))
 listener.listen(1)
 
-sensor = dht.DHT22(machine.Pin(15))
-
 while True:
     try:
         connection, peer = listener.accept()
@@ -34,19 +65,52 @@ while True:
         respond_404 = False
 
         if path == b"metrics":
-            sensor.measure()
-            response_body = """# HELP temperature The temperature at this sensor, in degrees Celsius
-# TYPE temperature gauge
-temperature {:.1f}
 
-# HELP humidity The relative humidity at this sensor, in percent
+            response_body = """# TYPE temperature gauge
 # TYPE humidity gauge
-humidity {:.1f}
-
-# HELP wifi_rssi WiFi signal strength (RSSI)
+# TYPE pressure gauge
 # TYPE wifi_rssi gauge
+"""
+
+            for sensor_label in sensors.keys():
+
+                sensor = sensors[sensor_label]
+                sensor_config = sensor_configs[sensor_label]
+
+                if sensor_config["type"] == "dht":
+                    sensor.measure()
+                    temperature = sensor.temperature()
+                    humidity = sensor.humidity()
+                    pressure = None
+
+                elif sensor_config["type"] == "bme":
+                    temperature, pressure, humidity = sensor.read_compensated_data()
+
+                response_body += make_response_section(
+                        "temperature",
+                        sensor_label,
+                        sensor_config["description"],
+                        sensor_config["type"],
+                        temperature)
+
+                response_body += make_response_section(
+                        "humidity",
+                        sensor_label,
+                        sensor_config["description"],
+                        sensor_config["type"],
+                        humidity)
+
+                if pressure:
+                    response_body += make_response_section(
+                            "pressure",
+                            sensor_label,
+                            sensor_config["description"],
+                            sensor_config["type"],
+                            pressure/100.)
+
+            response_body += """
 wifi_rssi {}
-""".format(sensor.temperature(), sensor.humidity(), wlan.status("rssi"))
+            """.format(wlan.status("rssi"))
 
             connection.send("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/plain; version=0.0.4\r\n\r\n".format(len(response_body)) + response_body)
 
