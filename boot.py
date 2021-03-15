@@ -85,6 +85,10 @@ while True:
                             sensor_config["type"],
                             value)
 
+            response_body += """
+wifi_rssi {}
+            """.format(wlan.status("rssi"))
+
             connection.send("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/plain; version=0.0.4\r\n\r\n".format(len(response_body)) + response_body)
 
         else:
@@ -120,7 +124,6 @@ while True:
 
         connection.close()
 
-    except Exception as e:
+    except:
         # I'd print an error, except that we don't have logging anyways.
-        # pass
-        raise e
+        pass
