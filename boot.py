@@ -2,11 +2,12 @@ import socket
 import network
 import wifi_secrets
 import machine
-import dht
-import bme280_float
 import uos
 import gc
 import time
+from irq_counter import IRQCounter
+from bme280_sensor import BME280Sensor
+from dht22_sensor import DHT22Sensor
 
 def make_response_section(name, label, description, sensor_type, value):
 
@@ -14,8 +15,7 @@ def make_response_section(name, label, description, sensor_type, value):
 {0}{{label="{1}", description="{2}", type="{3}"}} {4:.3f}""".format(name, label, description, sensor_type, value)
 
 sensor_configs = {
-    "dht": {"type": "dht", "port": machine.Pin(15), "description": "DHT22"},
-    "bme": {"type": "bme", "port": machine.I2C(0), "description": "BME280"}
+    "counter": {"type": "counter", "port": machine.Pin(26), "description": "Strom", "settings": {"trigger": machine.Pin.IRQ_FALLING, "cooldown": 500}},
 }
 
 # extra 3.3v pin (for connecting two sensors at once)
@@ -26,18 +26,20 @@ time.sleep(2)
 
 # initialize sensor objects
 sensors = {}
+provided_vars = set()
 for sensor_label, config in sensor_configs.items():
     if config["type"] == "dht":
-        sensors[sensor_label] = dht.DHT22(config["port"])
+        sensors[sensor_label] = DHT22Sensor(config["port"], **config.get("settings", {}))
     
     elif config["type"] == "bme":
-        sensors[sensor_label] = bme280_float.BME280(
-            i2c=config["port"],
-            filter_value=bme280_float.BME280_FILTER_OFF,
-            pressure_oversampling=bme280_float.BME280_OSAMPLE_8,
-            temperature_oversampling=bme280_float.BME280_OSAMPLE_1,
-            humidity_oversampling=bme280_float.BME280_OSAMPLE_1
-        )
+        sensors[sensor_label] = BME280Sensor(config["port"], **config.get("settings", {}))
+
+    elif config["type"] == "counter":
+        sensors[sensor_label] = IRQCounter(config["port"], **config.get("settings", {}))
+
+    provided_vars.update(set(sensors[sensor_label].provides))
+
+provided_vars = list(provided_vars)
 
 wlan = network.WLAN(network.STA_IF)
 wlan.active(True)
@@ -66,51 +68,22 @@ while True:
 
         if path == b"metrics":
 
-            response_body = """# TYPE temperature gauge
-# TYPE humidity gauge
-# TYPE pressure gauge
-# TYPE wifi_rssi gauge
-"""
+            response_body = "".join("# TYPE {} gauge\n".format(var)
+                    for var in provided_vars)
 
             for sensor_label in sensors.keys():
-
                 sensor = sensors[sensor_label]
                 sensor_config = sensor_configs[sensor_label]
 
-                if sensor_config["type"] == "dht":
-                    sensor.measure()
-                    temperature = sensor.temperature()
-                    humidity = sensor.humidity()
-                    pressure = None
+                data = sensor.readout()
 
-                elif sensor_config["type"] == "bme":
-                    temperature, pressure, humidity = sensor.read_compensated_data()
-
-                response_body += make_response_section(
-                        "temperature",
-                        sensor_label,
-                        sensor_config["description"],
-                        sensor_config["type"],
-                        temperature)
-
-                response_body += make_response_section(
-                        "humidity",
-                        sensor_label,
-                        sensor_config["description"],
-                        sensor_config["type"],
-                        humidity)
-
-                if pressure:
+                for name, value in data.items():
                     response_body += make_response_section(
-                            "pressure",
+                            name,
                             sensor_label,
                             sensor_config["description"],
                             sensor_config["type"],
-                            pressure/100.)
-
-            response_body += """
-wifi_rssi {}
-            """.format(wlan.status("rssi"))
+                            value)
 
             connection.send("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/plain; version=0.0.4\r\n\r\n".format(len(response_body)) + response_body)
 
@@ -147,6 +120,7 @@ wifi_rssi {}
 
         connection.close()
 
-    except:
+    except Exception as e:
         # I'd print an error, except that we don't have logging anyways.
-        pass
+        # pass
+        raise e
