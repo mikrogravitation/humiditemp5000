@@ -11,11 +11,18 @@ from dht22_sensor import DHT22Sensor
 
 def make_response_section(name, label, description, sensor_type, value):
 
+    if type(value) == float:
+        fmt = ".3f"
+
+    elif type(value) == int:
+        fmt = "d"
+
     return """
-{0}{{label="{1}", description="{2}", type="{3}"}} {4:.3f}""".format(name, label, description, sensor_type, value)
+{0}{{label="{1}", description="{2}", type="{3}"}} {4:{fmt}}""".format(name, label, description, sensor_type, value, fmt=fmt)
 
 sensor_configs = {
-    "counter": {"type": "counter", "port": machine.Pin(26), "description": "Strom", "settings": {"trigger": machine.Pin.IRQ_FALLING, "cooldown": 500}},
+    "dht": {"type": "dht", "port": machine.Pin(15), "description": "DHT22"},
+    "bme": {"type": "bme", "port": machine.I2C(0), "description": "BME280"},
 }
 
 # extra 3.3v pin (for connecting two sensors at once)
