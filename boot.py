@@ -6,12 +6,27 @@ import uos
 import usys
 import gc
 import time
+import uio
 from irq_counter import IRQCounter
 from bme280_sensor import BME280Sensor
 from dht22_sensor import DHT22Sensor
 from mhz19_sensor import MHZ19Sensor
 
 from config import sensor_configs
+
+class GrayLogger:
+
+    def __init__(self, ingest_location=("10.23.40.2", 5555)):
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.socket.connect(ingest_location)
+
+    def send(self, data):
+        print("sending data to graylog")
+        if type(data) == "str":
+            data = data.encode("ascii")
+
+        self.socket.send(data)
+
 
 def make_response_section(name, label, description, sensor_type, value):
 
@@ -24,129 +39,141 @@ def make_response_section(name, label, description, sensor_type, value):
     return """
 {0}{{label="{1}", description="{2}", type="{3}"}} {4:{fmt}}""".format(name, label, description, sensor_type, value, fmt=fmt)
 
-# extra 3.3v pin (for connecting two sensors at once)
-machine.Pin(13, machine.Pin.OUT).on()
+logger = GrayLogger()
+logger.send("hi!")
 
-print("before sleep")
+try:
 
-# wait for dht sensor to stabilize
-time.sleep(2)
+    # extra 3.3v pin (for connecting two sensors at once)
+    machine.Pin(13, machine.Pin.OUT).on()
 
-# initialize sensor objects
-sensors = {}
-provided_vars = set()
-for sensor_label, config in sensor_configs.items():
-    if config["type"] == "dht":
-        sensors[sensor_label] = DHT22Sensor(config["port"], **config.get("settings", {}))
-    
-    elif config["type"] == "bme":
-        sensors[sensor_label] = BME280Sensor(config["port"], **config.get("settings", {}))
+    print("before sleep")
 
-    elif config["type"] == "mhz":
-        sensors[sensor_label] = MHZ19Sensor(config["port"], **config.get("settings", {}))
+    # wait for dht sensor to stabilize
+    time.sleep(2)
 
-    elif config["type"] == "counter":
-        sensors[sensor_label] = IRQCounter(config["port"], **config.get("settings", {}))
+    # initialize sensor objects
+    sensors = {}
+    provided_vars = set()
+    for sensor_label, config in sensor_configs.items():
+        if config["type"] == "dht":
+            sensors[sensor_label] = DHT22Sensor(config["port"], **config.get("settings", {}))
+        
+        elif config["type"] == "bme":
+            sensors[sensor_label] = BME280Sensor(config["port"], **config.get("settings", {}))
 
-    provided_vars.update(set(sensors[sensor_label].provides))
+        elif config["type"] == "mhz":
+            sensors[sensor_label] = MHZ19Sensor(config["port"], **config.get("settings", {}))
 
-provided_vars = list(provided_vars)
+        elif config["type"] == "counter":
+            sensors[sensor_label] = IRQCounter(config["port"], **config.get("settings", {}))
 
-wlan = network.WLAN(network.STA_IF)
-wlan.active(True)
-if not wlan.isconnected():
-    print('connecting to network...')
-    wlan.connect(wifi_secrets.wifi_ssid, wifi_secrets.wifi_passphrase)
-    while not wlan.isconnected():
-        pass
-print('network config:', wlan.ifconfig())
-print('signal strength:', wlan.status("rssi"))
+        provided_vars.update(set(sensors[sensor_label].provides))
 
-listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-listener.bind(("0.0.0.0", 5000))
-listener.listen(1)
+    provided_vars = list(provided_vars)
 
-while True:
-    connection = None
-    try:
-        connection, peer = listener.accept()
-        request = connection.recv(100)
+    wlan = network.WLAN(network.STA_IF)
+    wlan.active(True)
+    if not wlan.isconnected():
+        print('connecting to network...')
+        wlan.connect(wifi_secrets.wifi_ssid, wifi_secrets.wifi_passphrase)
+        while not wlan.isconnected():
+            pass
+    print('network config:', wlan.ifconfig())
+    print('signal strength:', wlan.status("rssi"))
 
-        print(request)
-        method, url, protocol = request.split(b"\r\n", 1)[0].split(b" ")
-        path = url.split(b"/", 1)[1]
-        print("incoming request: method {}, url {}, path {}, protocol {}".format(method, url, path, protocol))
-        respond_404 = False
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("0.0.0.0", 5000))
+    listener.listen(1)
 
-        if path == b"metrics":
+    while True:
+        connection = None
+        try:
+            connection, peer = listener.accept()
+            request = connection.recv(100)
 
-            response_body = "".join("# TYPE {} gauge\n".format(var)
-                    for var in provided_vars)
+            print(request)
+            method, url, protocol = request.split(b"\r\n", 1)[0].split(b" ")
+            path = url.split(b"/", 1)[1]
+            print("incoming request: method {}, url {}, path {}, protocol {}".format(method, url, path, protocol))
+            respond_404 = False
 
-            for sensor_label in sensors.keys():
-                sensor = sensors[sensor_label]
-                sensor_config = sensor_configs[sensor_label]
+            if path == b"metrics":
 
-                data = sensor.readout()
+                response_body = "".join("# TYPE {} gauge\n".format(var)
+                        for var in provided_vars)
 
-                for name, value in data.items():
-                    response_body += make_response_section(
-                            name,
-                            sensor_label,
-                            sensor_config["description"],
-                            sensor_config["type"],
-                            value)
+                for sensor_label in sensors.keys():
+                    sensor = sensors[sensor_label]
+                    sensor_config = sensor_configs[sensor_label]
 
-            response_body += """
-wifi_rssi {}
-            """.format(wlan.status("rssi"))
+                    data = sensor.readout()
 
-            connection.send("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/plain; version=0.0.4\r\n\r\n".format(len(response_body)) + response_body)
+                    for name, value in data.items():
+                        response_body += make_response_section(
+                                name,
+                                sensor_label,
+                                sensor_config["description"],
+                                sensor_config["type"],
+                                value)
 
-        elif path == b"config":
-            with open("config.py", "rb") as f:
-                data = f.read()
-                connection.send("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n".format(len(data)).encode("ascii") + data)
+                response_body += """
+    wifi_rssi {}
+                """.format(wlan.status("rssi"))
 
-        else:
-            
-            file_found = False
+                connection.send("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/plain; version=0.0.4\r\n\r\n".format(len(response_body)) + response_body)
 
-            if path == b"":
-                path = b"index.html"
+            elif path == b"config":
+                with open("config.py", "rb") as f:
+                    data = f.read()
+                    connection.send("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n".format(len(data)).encode("ascii") + data)
 
-            for entry_info in uos.ilistdir("webroot"):
-                name = entry_info[0]
-                print("iterating over files in the webroot: {}".format(name))
-                if name.encode("ascii") == path:
-                    with open("webroot/" + name, "rb") as f:
-                        length = f.seek(0, 2)
-                        f.seek(0)
-                        connection.send("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n".format(length).encode("ascii"))
+            else:
+                
+                file_found = False
 
-                        # read the response in chunks, we don't have that much ram
-                        while True:
-                            chunk = f.read(10000)
-                            if len(chunk) == 0:
-                                break
-                            connection.send(chunk)
-                            del chunk
-                            gc.collect()
+                if path == b"":
+                    path = b"index.html"
 
-                    file_found = True
+                for entry_info in uos.ilistdir("webroot"):
+                    name = entry_info[0]
+                    print("iterating over files in the webroot: {}".format(name))
+                    if name.encode("ascii") == path:
+                        with open("webroot/" + name, "rb") as f:
+                            length = f.seek(0, 2)
+                            f.seek(0)
+                            connection.send("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n".format(length).encode("ascii"))
 
-            if not file_found:
-                response_body = "sorry, but we couldn't find that location :/"
-                connection.send("HTTP/1.1 404 not found\r\nContent-Length: {}\r\n\r\n".format(len(response_body)) + response_body)
+                            # read the response in chunks, we don't have that much ram
+                            while True:
+                                chunk = f.read(10000)
+                                if len(chunk) == 0:
+                                    break
+                                connection.send(chunk)
+                                del chunk
+                                gc.collect()
 
-    except KeyboardInterrupt as e:
-        raise e
+                        file_found = True
 
-    except Exception as e:
-        # I'd print an error, except that we don't have logging anyways.
-        usys.print_exception(e)
-        #raise e
+                if not file_found:
+                    response_body = "sorry, but we couldn't find that location :/"
+                    connection.send("HTTP/1.1 404 not found\r\nContent-Length: {}\r\n\r\n".format(len(response_body)) + response_body)
 
-    finally:
-        if connection:
-            connection.close()
+        except KeyboardInterrupt as e:
+            raise e
+
+        except Exception as e:
+            buf = uio.StringIO()
+            usys.print_exception(e, buf)
+            logger.send(buf.getvalue())
+            #raise e
+
+        finally:
+            if connection:
+                connection.close()
+
+except Exception as e:
+    buf = uio.StringIO()
+    usys.print_exception(e, buf)
+    logger.send(buf.getvalue())
+    raise e
