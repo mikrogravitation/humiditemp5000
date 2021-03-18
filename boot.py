@@ -11,6 +11,8 @@ from bme280_sensor import BME280Sensor
 from dht22_sensor import DHT22Sensor
 from mhz19_sensor import MHZ19Sensor
 
+from config import sensor_configs
+
 def make_response_section(name, label, description, sensor_type, value):
 
     if type(value) == float:
@@ -21,10 +23,6 @@ def make_response_section(name, label, description, sensor_type, value):
 
     return """
 {0}{{label="{1}", description="{2}", type="{3}"}} {4:{fmt}}""".format(name, label, description, sensor_type, value, fmt=fmt)
-
-sensor_configs = {
-    "mhz19": {"type": "mhz", "port": machine.UART(2), "description": "MH-Z19"},
-}
 
 # extra 3.3v pin (for connecting two sensors at once)
 machine.Pin(13, machine.Pin.OUT).on()
@@ -104,6 +102,11 @@ wifi_rssi {}
             """.format(wlan.status("rssi"))
 
             connection.send("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/plain; version=0.0.4\r\n\r\n".format(len(response_body)) + response_body)
+
+        elif path == b"config":
+            with open("config.py", "rb") as f:
+                data = f.read()
+                connection.send("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n".format(len(data)).encode("ascii") + data)
 
         else:
             
