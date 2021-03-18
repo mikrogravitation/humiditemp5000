@@ -3,11 +3,13 @@ import network
 import wifi_secrets
 import machine
 import uos
+import usys
 import gc
 import time
 from irq_counter import IRQCounter
 from bme280_sensor import BME280Sensor
 from dht22_sensor import DHT22Sensor
+from mhz19_sensor import MHZ19Sensor
 
 def make_response_section(name, label, description, sensor_type, value):
 
@@ -21,12 +23,13 @@ def make_response_section(name, label, description, sensor_type, value):
 {0}{{label="{1}", description="{2}", type="{3}"}} {4:{fmt}}""".format(name, label, description, sensor_type, value, fmt=fmt)
 
 sensor_configs = {
-    "dht": {"type": "dht", "port": machine.Pin(15), "description": "DHT22"},
-    "bme": {"type": "bme", "port": machine.I2C(0), "description": "BME280"},
+    "mhz19": {"type": "mhz", "port": machine.UART(2), "description": "MH-Z19"},
 }
 
 # extra 3.3v pin (for connecting two sensors at once)
 machine.Pin(13, machine.Pin.OUT).on()
+
+print("before sleep")
 
 # wait for dht sensor to stabilize
 time.sleep(2)
@@ -40,6 +43,9 @@ for sensor_label, config in sensor_configs.items():
     
     elif config["type"] == "bme":
         sensors[sensor_label] = BME280Sensor(config["port"], **config.get("settings", {}))
+
+    elif config["type"] == "mhz":
+        sensors[sensor_label] = MHZ19Sensor(config["port"], **config.get("settings", {}))
 
     elif config["type"] == "counter":
         sensors[sensor_label] = IRQCounter(config["port"], **config.get("settings", {}))
@@ -63,6 +69,7 @@ listener.bind(("0.0.0.0", 5000))
 listener.listen(1)
 
 while True:
+    connection = None
     try:
         connection, peer = listener.accept()
         request = connection.recv(100)
@@ -129,8 +136,14 @@ wifi_rssi {}
                 response_body = "sorry, but we couldn't find that location :/"
                 connection.send("HTTP/1.1 404 not found\r\nContent-Length: {}\r\n\r\n".format(len(response_body)) + response_body)
 
-        connection.close()
+    except KeyboardInterrupt as e:
+        raise e
 
-    except:
+    except Exception as e:
         # I'd print an error, except that we don't have logging anyways.
-        pass
+        usys.print_exception(e)
+        #raise e
+
+    finally:
+        if connection:
+            connection.close()
