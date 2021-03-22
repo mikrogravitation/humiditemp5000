@@ -133,8 +133,14 @@ try:
                                 value)
 
                 response_body += """
+
+# TYPE wifi_rssi gauge
+# TYPE memory_used gauge
+# TYPE memory_free gauge
 wifi_rssi {}
-                """.format(wlan.status("rssi"))
+memory_used {}
+memory_free {}
+                """.format(wlan.status("rssi"), gc.mem_alloc(), gc.mem_free())
 
                 connection.send("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/plain; version=0.0.4\r\n\r\n".format(len(response_body)) + response_body)
 
@@ -142,6 +148,41 @@ wifi_rssi {}
                 with open("config.py", "rb") as f:
                     data = f.read()
                     connection.send("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n".format(len(data)).encode("ascii") + data)
+
+            elif path == b"ota-listing":
+
+                files = []
+
+                for entry_info in uos.ilistdir("/"):
+                    name = entry_info[0]
+                    entry_type = entry_info[1]
+
+                    if name == "glitter":
+                        continue
+
+                    if entry_type & 0x8000:
+                        # compute a git-compatible hash
+                        hasher = hashlib.sha1(b"blob ")
+                        with open(name, "rb") as f:
+                            length = f.seek(0, 2)
+                            f.seek(0)
+
+                            hasher.update(str(length).encode("ascii") + bytes([0]))
+
+                            while True:
+                                chunk = f.read(10000)
+                                if len(chunk) == 0:
+                                    break
+                                hasher.update(chunk)
+                                del chunk
+                                gc.collect()
+
+                        checksum = ubinascii.hexlify(hasher.digest())
+
+                        files.append(name.encode("ascii") + b" " + checksum)
+
+                response = b"\n".join(files)
+                connection.send("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n".format(len(response)).encode("ascii") + response)
 
             elif path.startswith(b"ota/"):
 
@@ -164,6 +205,7 @@ wifi_rssi {}
                     connection.send("HTTP/1.1 403 forbidden\r\nContent-Length: {}\r\n\r\n".format(len(body)).encode("ascii") + body)
                     continue
 
+
                 if method == b"GET":
                     try:
                         is_file = uos.stat(filename)[0] & 0x8000
@@ -179,6 +221,20 @@ wifi_rssi {}
                         response_body = "sorry, but we couldn't find that location :/"
                         connection.send("HTTP/1.1 404 not found\r\nContent-Length: {}\r\n\r\n".format(len(response_body)) + response_body)
                         
+                elif method == b"DELETE":
+                    try:
+                        is_file = uos.stat(filename)[0] & 0x8000
+                    except:
+                        is_file = False
+
+                    if is_file:
+                        uos.remove(filename)
+                        response_body = "file deleted."
+                        connection.send("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n".format(len(response_body)) + response_body)
+
+                    else:
+                        response_body = "file not found"
+                        connection.send("HTTP/1.1 404 not found\r\nContent-Length: {}\r\n\r\n".format(len(response_body)) + response_body)
 
                 elif method == b"PUT":
                     query_match = ure.match(r"[^?]*\?sparkle=([0-9a-f]+)$", url)
