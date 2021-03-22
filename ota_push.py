@@ -22,7 +22,7 @@ hmac = binascii.hexlify(
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.connect((device, 5000))
 
-s.send("PUT /ota/{}?hmac={} HTTP/1.1\r\ncontent-length: {}\r\nhost: bla\r\n\r\n".format(
+s.send("PUT /ota/{}?sparkle={} HTTP/1.1\r\ncontent-length: {}\r\nhost: bla\r\n\r\n".format(
     filename,
     hmac,
     len(file_contents)).encode("ascii") + file_contents)

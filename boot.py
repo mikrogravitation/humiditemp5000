@@ -8,7 +8,7 @@ import gc
 import time
 import ure
 import hashlib
-from hmac_sha256 import HMAC
+from sparkle import Sparkle
 import ubinascii
 import uio
 from irq_counter import IRQCounter
@@ -62,9 +62,9 @@ listener = None
 
 try:
 
-    with open("device_ota_key", "r") as f:
-        hex_key = f.read()
-        ota_key = ubinascii.unhexlify(hex_key)
+    with open("glitter", "r") as f:
+        hex_glitter = f.read()
+        glitter = ubinascii.unhexlify(hex_glitter)
 
     # extra 3.3v pin (for connecting two sensors at once)
     machine.Pin(13, machine.Pin.OUT).on()
@@ -159,8 +159,8 @@ wifi_rssi {}
                     connection.send("HTTP/1.1 400 bad request\r\nContent-Length: {}\r\n\r\n".format(len(body)).encode("ascii") + body)
                     continue
 
-                if filename == "wifi_secrets.py" or filename == "device_ota_key":
-                    body = b"not sure if it makes sense to protect both of these, but one definitely yes"
+                if filename == "wifi_secrets.py" or filename == "glitter":
+                    body = b"the glitter is secret!"
                     connection.send("HTTP/1.1 403 forbidden\r\nContent-Length: {}\r\n\r\n".format(len(body)).encode("ascii") + body)
                     continue
 
@@ -181,13 +181,13 @@ wifi_rssi {}
                         
 
                 elif method == b"PUT":
-                    query_match = ure.match(r"[^?]*\?hmac=([0-9a-f]+)$", url)
+                    query_match = ure.match(r"[^?]*\?sparkle=([0-9a-f]+)$", url)
                     if not query_match:
-                        body = b"an hmac signature is required for validation"
+                        body = b"no sparkle found, please add sparkle"
                         connection.send("HTTP/1.1 400 bad request\r\nContent-Length: {}\r\n\r\n".format(len(body)).encode("ascii") + body)
                         continue
 
-                    hmac_signature = query_match.group(1)
+                    given_sparkle = query_match.group(1)
 
                     # try to find the content-length header
                     request_head, content = request.split(b"\r\n\r\n")
@@ -204,15 +204,15 @@ wifi_rssi {}
                         content += connection.recv(missing_content_length)
                         missing_content_length = content_length - len(content)
 
-                    hmac = HMAC(ota_key, filename.encode("ascii") + b" " + content).digest()
-                    received_mac = ubinascii.hexlify(hmac)
-                    print(received_mac)
+                    new_sparkle = Sparkle(glitter, filename.encode("ascii") + b" " + content).make_sparkle()
+                    new_sparkle = ubinascii.hexlify(new_sparkle)
+                    print(new_sparkle)
                     print(len(content))
                     print(missing_content_length)
                     print(content_length)
 
-                    if received_mac != hmac_signature:
-                        body = b"hmac validation failed"
+                    if new_sparkle != given_sparkle:
+                        body = b"your sparkle wasn't the right one for this file, try again!"
                         connection.send("HTTP/1.1 400 bad request\r\nContent-Length: {}\r\n\r\n".format(len(body)).encode("ascii") + body)
                         continue
 

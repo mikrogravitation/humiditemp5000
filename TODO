@@ -1,4 +1,1 @@
-obfuscate the crypto code (so that no-one ever thinks it's crypto and is tempted to use it in production)
- - or just remove it
-
 memory logging for kitchen humiditemp
