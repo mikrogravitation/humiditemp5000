@@ -25,3 +25,7 @@ not ambiguous. then, compute the hmac-sha256 (using the device key) over this co
 encode the results as a hex string.
 
 hmac = hexlify(hmac_sha256(device_key, <filename> + " " + <file contents>))
+
+deleting files: DELETE /ota/<filename>?sparkle=<sparkle>
+
+for deleting files, the sparkle is made _only_ of the filename, without a space or contents after it.
