@@ -17,7 +17,7 @@ from dht22_sensor import DHT22Sensor
 from mhz19_sensor import MHZ19Sensor
 from sds011_sensor import SDS011Sensor
 
-from config import sensor_configs
+from config import sensor_configs, hostname
 
 class GrayLogger:
 
@@ -47,6 +47,7 @@ def make_response_section(name, label, description, sensor_type, value):
 
 wlan = network.WLAN(network.STA_IF)
 wlan.active(True)
+wlan.config(dhcp_hostname=hostname)
 if not wlan.isconnected():
     print('connecting to network...')
     wlan.connect(wifi_secrets.wifi_ssid, wifi_secrets.wifi_passphrase)
