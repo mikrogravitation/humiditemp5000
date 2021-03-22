@@ -1,5 +1,7 @@
 # secret wifi secrets
 wifi_secrets.py
+# secret glitter
+glitter.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

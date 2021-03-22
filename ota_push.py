@@ -4,7 +4,7 @@ import json
 import binascii
 import hmac
 
-with open("device_ota_keys.json") as f:
+with open("glitter.json") as f:
     ota_keys = json.load(f)
 
 device = sys.argv[1]

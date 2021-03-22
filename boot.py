@@ -222,6 +222,22 @@ memory_free {}
                         connection.send("HTTP/1.1 404 not found\r\nContent-Length: {}\r\n\r\n".format(len(response_body)) + response_body)
                         
                 elif method == b"DELETE":
+                    query_match = ure.match(r"[^?]*\?sparkle=([0-9a-f]+)$", url)
+                    if not query_match:
+                        body = b"no sparkle found, please add sparkle"
+                        connection.send("HTTP/1.1 400 bad request\r\nContent-Length: {}\r\n\r\n".format(len(body)).encode("ascii") + body)
+                        continue
+
+                    given_sparkle = query_match.group(1)
+
+                    new_sparkle = Sparkle(glitter, filename.encode("ascii")).make_sparkle()
+                    new_sparkle = ubinascii.hexlify(new_sparkle)
+
+                    if new_sparkle != given_sparkle:
+                        body = b"your sparkle wasn't the right one for this file, try again!"
+                        connection.send("HTTP/1.1 400 bad request\r\nContent-Length: {}\r\n\r\n".format(len(body)).encode("ascii") + body)
+                        continue
+
                     try:
                         is_file = uos.stat(filename)[0] & 0x8000
                     except:
