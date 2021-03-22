@@ -187,7 +187,7 @@ wifi_rssi {}
                         connection.send("HTTP/1.1 400 bad request\r\nContent-Length: {}\r\n\r\n".format(len(body)).encode("ascii") + body)
                         continue
 
-                    checksum = query_match.group(1)
+                    hmac_signature = query_match.group(1)
 
                     # try to find the content-length header
                     request_head, content = request.split(b"\r\n\r\n")
@@ -211,8 +211,8 @@ wifi_rssi {}
                     print(missing_content_length)
                     print(content_length)
 
-                    if received_mac != checksum:
-                        body = b"checksum mismatch"
+                    if received_mac != hmac_signature:
+                        body = b"hmac validation failed"
                         connection.send("HTTP/1.1 400 bad request\r\nContent-Length: {}\r\n\r\n".format(len(body)).encode("ascii") + body)
                         continue
 
