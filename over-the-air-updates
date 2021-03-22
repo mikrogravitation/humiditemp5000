@@ -1,0 +1,27 @@
+currently, for ota, only access to files in the root directory is supported.
+(otherwise, we might have to create new directories etc, seems complicated)
+
+retrieving files: GET /ota/<filename>
+
+putting files: PUT /ota/<filename>?hmac=<hmac> ...
+
+for putting files, the content length header is required. the binary file contents
+are sent unencoded in the request body.
+
+ota updates are signed using symmetric crypto (asymmetric seemed to complicated)
+signing updates is not necessary since the devices are already protected by being
+in a wifi with restricted access. the signing is here for fun. it's not actually secure.
+
+(if this gets removed, it might be a good idea to replace the hmac with a simple sha256
+checksum. this was how it was before i added the hmac.)
+
+each device has a device key stored in the file "device_ota_key" in the root directory.
+this is used to check macs.
+
+to compute the mac, take the filename (only the filename, remember we only support updating
+files in the root directory, so a full path is not necessary), and prepend it to the contents
+of the file, separated by a space character. the filename may not contain spaces, so this is
+not ambiguous. then, compute the hmac-sha256 (using the device key) over this construction, and
+encode the results as a hex string.
+
+hmac = hexlify(hmac_sha256(device_key, <filename> + " " + <file contents>))

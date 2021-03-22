@@ -6,11 +6,16 @@ import uos
 import usys
 import gc
 import time
+import ure
+import hashlib
+from hmac_sha256 import HMAC
+import ubinascii
 import uio
 from irq_counter import IRQCounter
 from bme280_sensor import BME280Sensor
 from dht22_sensor import DHT22Sensor
 from mhz19_sensor import MHZ19Sensor
+from sds011_sensor import SDS011Sensor
 
 from config import sensor_configs
 
@@ -39,10 +44,27 @@ def make_response_section(name, label, description, sensor_type, value):
     return """
 {0}{{label="{1}", description="{2}", type="{3}"}} {4:{fmt}}""".format(name, label, description, sensor_type, value, fmt=fmt)
 
+
+wlan = network.WLAN(network.STA_IF)
+wlan.active(True)
+if not wlan.isconnected():
+    print('connecting to network...')
+    wlan.connect(wifi_secrets.wifi_ssid, wifi_secrets.wifi_passphrase)
+    while not wlan.isconnected():
+        pass
+print('network config:', wlan.ifconfig())
+print('signal strength:', wlan.status("rssi"))
+
 logger = GrayLogger()
 logger.send("hi!")
 
+listener = None
+
 try:
+
+    with open("device_ota_key", "r") as f:
+        hex_key = f.read()
+        ota_key = ubinascii.unhexlify(hex_key)
 
     # extra 3.3v pin (for connecting two sensors at once)
     machine.Pin(13, machine.Pin.OUT).on()
@@ -65,22 +87,15 @@ try:
         elif config["type"] == "mhz":
             sensors[sensor_label] = MHZ19Sensor(config["port"], **config.get("settings", {}))
 
+        elif config["type"] == "sds":
+            sensors[sensor_label] = SDS011Sensor(config["port"], **config.get("settings", {}))
+
         elif config["type"] == "counter":
             sensors[sensor_label] = IRQCounter(config["port"], **config.get("settings", {}))
 
         provided_vars.update(set(sensors[sensor_label].provides))
 
     provided_vars = list(provided_vars)
-
-    wlan = network.WLAN(network.STA_IF)
-    wlan.active(True)
-    if not wlan.isconnected():
-        print('connecting to network...')
-        wlan.connect(wifi_secrets.wifi_ssid, wifi_secrets.wifi_passphrase)
-        while not wlan.isconnected():
-            pass
-    print('network config:', wlan.ifconfig())
-    print('signal strength:', wlan.status("rssi"))
 
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.bind(("0.0.0.0", 5000))
@@ -90,7 +105,7 @@ try:
         connection = None
         try:
             connection, peer = listener.accept()
-            request = connection.recv(100)
+            request = connection.recv(400)
 
             print(request)
             method, url, protocol = request.split(b"\r\n", 1)[0].split(b" ")
@@ -118,7 +133,7 @@ try:
                                 value)
 
                 response_body += """
-    wifi_rssi {}
+wifi_rssi {}
                 """.format(wlan.status("rssi"))
 
                 connection.send("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/plain; version=0.0.4\r\n\r\n".format(len(response_body)) + response_body)
@@ -127,6 +142,96 @@ try:
                 with open("config.py", "rb") as f:
                     data = f.read()
                     connection.send("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n".format(len(data)).encode("ascii") + data)
+
+            elif path.startswith(b"ota/"):
+
+                path = path.decode("ascii")
+                path = path.split("?")[0]
+                path_parts = path.split("/")[1:]
+                if len(path_parts) > 1:
+                    body = b"ota is currently not supported for files in directories other than /"
+                    connection.send("HTTP/1.1 404 not found\r\nContent-Length: {}\r\n\r\n".format(len(body)).encode("ascii") + body)
+                    continue
+
+                filename = path_parts[0]
+                if not ure.match(r"[0-9a-zA-Z_.]+$", filename):
+                    body = b"invalid filename: may only contain digits, letters, or underscore"
+                    connection.send("HTTP/1.1 400 bad request\r\nContent-Length: {}\r\n\r\n".format(len(body)).encode("ascii") + body)
+                    continue
+
+                if filename == "wifi_secrets.py" or filename == "device_ota_key":
+                    body = b"not sure if it makes sense to protect both of these, but one definitely yes"
+                    connection.send("HTTP/1.1 403 forbidden\r\nContent-Length: {}\r\n\r\n".format(len(body)).encode("ascii") + body)
+                    continue
+
+                if method == b"GET":
+                    try:
+                        is_file = uos.stat(filename)[0] & 0x8000
+                    except:
+                        is_file = False
+
+                    if is_file:
+                        with open(filename, "rb") as f:
+                            data = f.read()
+                            connection.send("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n".format(len(data)).encode("ascii") + data)
+
+                    else:
+                        response_body = "sorry, but we couldn't find that location :/"
+                        connection.send("HTTP/1.1 404 not found\r\nContent-Length: {}\r\n\r\n".format(len(response_body)) + response_body)
+                        
+
+                elif method == b"PUT":
+                    query_match = ure.match(r"[^?]*\?hmac=([0-9a-f]+)$", url)
+                    if not query_match:
+                        body = b"an hmac signature is required for validation"
+                        connection.send("HTTP/1.1 400 bad request\r\nContent-Length: {}\r\n\r\n".format(len(body)).encode("ascii") + body)
+                        continue
+
+                    checksum = query_match.group(1)
+
+                    # try to find the content-length header
+                    request_head, content = request.split(b"\r\n\r\n")
+                    request_head += "\r\n"
+                    content_length_match = ure.search(b"[cC][oO][nN][tT][eE][nN][tT]-[lL][eE][nN][gG][tT][hH]:[ \t]+([0-9]+)\r\n", request_head)
+                    if not content_length_match:
+                        body = b"length header is required for putting files"
+                        connection.send("HTTP/1.1 411 length required\r\nContent-Length: {}\r\n\r\n".format(len(body)).encode("ascii") + body)
+                        continue
+
+                    content_length = int(content_length_match.group(1))
+                    missing_content_length = content_length - len(content)
+                    while missing_content_length > 0:
+                        content += connection.recv(missing_content_length)
+                        missing_content_length = content_length - len(content)
+
+                    hmac = HMAC(ota_key, filename.encode("ascii") + b" " + content).digest()
+                    received_mac = ubinascii.hexlify(hmac)
+                    print(received_mac)
+                    print(len(content))
+                    print(missing_content_length)
+                    print(content_length)
+
+                    if received_mac != checksum:
+                        body = b"checksum mismatch"
+                        connection.send("HTTP/1.1 400 bad request\r\nContent-Length: {}\r\n\r\n".format(len(body)).encode("ascii") + body)
+                        continue
+
+                    with open(filename + ".part", "wb") as f:
+                        f.write(content)
+
+                    uos.rename(filename + ".part", filename)
+                    body = b"update successful"
+                    connection.send("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n".format(len(body)).encode("ascii") + body)
+
+            elif path.startswith(b"reboot"):
+                logger.send("received reboot request, rebooting...")
+                response_body = "rebooting... see you later (hopefully)"
+                connection.send("HTTP/1.1 202 accepted\r\nContent-Length: {}\r\n\r\n".format(len(response_body)) + response_body)
+
+                # this is a hard reboot due to eaddrinuse errors
+                # (soft reboots keep the part of the network stack apparently, see here:
+                # https://github.com/micropython/micropython/issues/3739#issuecomment-384037222 )
+                machine.reset()
 
             else:
                 
@@ -166,7 +271,6 @@ try:
             buf = uio.StringIO()
             usys.print_exception(e, buf)
             logger.send(buf.getvalue())
-            #raise e
 
         finally:
             if connection:
@@ -177,3 +281,7 @@ except Exception as e:
     usys.print_exception(e, buf)
     logger.send(buf.getvalue())
     raise e
+
+finally:
+    if listener:
+        listener.close()
