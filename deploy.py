@@ -10,6 +10,20 @@ import re
 import yaml
 from sparkle import Sparkle
 from git import Repo
+import argparse
+
+
+def make_argument_parser():
+
+    parser = argparse.ArgumentParser(description="deploy files from current directory, based on the deploy-listing file")
+    parser.add_argument("device", type=str,
+                        help="device name; this should probably be the device hostname. it has to match a device entry in devices.yaml, and it has to resolve to the IP of the device.")
+    parser.add_argument('--noop', action="store_true",
+                        help="do a no-op run (not actually pushing changes to the device)")
+    parser.add_argument('--no-reboot', action="store_true",
+                        help="skip the reboot step after finishing updates")
+
+    return parser
 
 
 def make_sparkle(glitter, data):
@@ -193,9 +207,21 @@ def get_remote_file(remote, filename):
     return response.text
 
 
+def reboot_remote(remote):
+
+    response = requests.get(f"http://{remote}:5000/reboot")
+
+    print(
+        f" => {response.status_code} {response.reason}: {response.text}"
+    )
+
+
 if __name__ == "__main__":
 
-    device = sys.argv[1]
+    parser = make_argument_parser()
+    args = parser.parse_args()
+
+    device = args.device
 
     with open("devices.yaml") as f:
         device_configs = yaml.safe_load(f)
@@ -222,6 +248,8 @@ if __name__ == "__main__":
 
     repo = git.Repo()
 
+    made_changes = False
+
     for filename in all_file_names:
 
         old_sha1 = remote_files.get(filename, "--")
@@ -229,6 +257,8 @@ if __name__ == "__main__":
 
         if new_sha1 == old_sha1:
             continue
+
+        made_changes = True
 
         print(f"File {filename}:")
 
@@ -248,6 +278,7 @@ if __name__ == "__main__":
         if old_sha1 != "--" and new_sha1 != "--":
 
             try:
+                # config.py is generated and never in git, so we have to retrieve it
                 if filename == "config.py":
                     old_file_contents = get_remote_file(device, "config.py")
                 else:
@@ -281,4 +312,12 @@ if __name__ == "__main__":
             push_remote_file(device, glitter, filename, file_contents=new_file_contents)
             pass
 
-    print("all good.")
+    if not made_changes:
+        print("nothing to do!")
+
+    elif args.no_reboot:
+        print("all files synced, skipping reboot")
+
+    else:
+        print("rebooting...")
+        reboot_remote(device)
