@@ -267,8 +267,6 @@ memory_free {}
                     given_sparkle = query_match.group(1)
                     do_noop = query_match.group(4) is not None
 
-                    logger.send("do_noop: {}".format(do_noop).encode("ascii"))
-
                     # try to find the content-length header
                     request_head, content = request.split(b"\r\n\r\n")
                     request_head += "\r\n"
