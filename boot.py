@@ -223,15 +223,17 @@ memory_free {}
                         connection.send("HTTP/1.1 404 not found\r\nContent-Length: {}\r\n\r\n".format(len(response_body)) + response_body)
                         
                 elif method == b"DELETE":
-                    query_match = ure.match(r"[^?]*\?sparkle=([0-9a-f]+)$", url)
+                    query_match = ure.match(r"[^?]*\?sparkle=([0-9a-f]+)(&noop=((yes)|no))?$", url)
                     if not query_match:
                         body = b"no sparkle found, please add sparkle"
                         connection.send("HTTP/1.1 400 bad request\r\nContent-Length: {}\r\n\r\n".format(len(body)).encode("ascii") + body)
                         continue
 
                     given_sparkle = query_match.group(1)
+                    do_noop = query_match.group(4) is not None
 
-                    new_sparkle = Sparkle(glitter, filename.encode("ascii")).make_sparkle()
+                    noop_prefix = b"--noop " if do_noop else b""
+                    new_sparkle = Sparkle(glitter, noop_prefix + filename.encode("ascii")).make_sparkle()
                     new_sparkle = ubinascii.hexlify(new_sparkle)
 
                     if new_sparkle != given_sparkle:
@@ -245,7 +247,9 @@ memory_free {}
                         is_file = False
 
                     if is_file:
-                        uos.remove(filename)
+                        if do_noop is False:
+                            uos.remove(filename)
+
                         response_body = "file deleted."
                         connection.send("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n".format(len(response_body)) + response_body)
 
@@ -254,13 +258,16 @@ memory_free {}
                         connection.send("HTTP/1.1 404 not found\r\nContent-Length: {}\r\n\r\n".format(len(response_body)) + response_body)
 
                 elif method == b"PUT":
-                    query_match = ure.match(r"[^?]*\?sparkle=([0-9a-f]+)$", url)
+                    query_match = ure.match(r"[^?]*\?sparkle=([0-9a-f]+)(&noop=((yes)|no))?$", url)
                     if not query_match:
                         body = b"no sparkle found, please add sparkle"
                         connection.send("HTTP/1.1 400 bad request\r\nContent-Length: {}\r\n\r\n".format(len(body)).encode("ascii") + body)
                         continue
 
                     given_sparkle = query_match.group(1)
+                    do_noop = query_match.group(4) is not None
+
+                    logger.send("do_noop: {}".format(do_noop).encode("ascii"))
 
                     # try to find the content-length header
                     request_head, content = request.split(b"\r\n\r\n")
@@ -277,7 +284,8 @@ memory_free {}
                         content += connection.recv(missing_content_length)
                         missing_content_length = content_length - len(content)
 
-                    new_sparkle = Sparkle(glitter, filename.encode("ascii") + b" " + content).make_sparkle()
+                    noop_prefix = b"--noop " if do_noop else b""
+                    new_sparkle = Sparkle(glitter, noop_prefix + filename.encode("ascii") + b" " + content).make_sparkle()
                     new_sparkle = ubinascii.hexlify(new_sparkle)
                     print(new_sparkle)
                     print(len(content))
@@ -289,10 +297,12 @@ memory_free {}
                         connection.send("HTTP/1.1 400 bad request\r\nContent-Length: {}\r\n\r\n".format(len(body)).encode("ascii") + body)
                         continue
 
-                    with open(filename + ".part", "wb") as f:
-                        f.write(content)
+                    if do_noop is False:
+                        with open(filename + ".part", "wb") as f:
+                            f.write(content)
 
-                    uos.rename(filename + ".part", filename)
+                        uos.rename(filename + ".part", filename)
+
                     body = b"update successful"
                     connection.send("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n".format(len(body)).encode("ascii") + body)
 

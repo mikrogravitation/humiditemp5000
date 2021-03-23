@@ -143,14 +143,15 @@ def get_local_file_listing(config_py):
     return local_files
 
 
-def delete_remote_file(remote, glitter, filename):
+def delete_remote_file(remote, glitter, filename, noop=False):
 
-    sparkle = make_sparkle(glitter, filename.encode("ascii"))
+    noop_prefix = b"--noop " if noop else b""
+    sparkle = make_sparkle(glitter, noop_prefix + filename.encode("ascii"))
 
     print(f"  deleting file '{filename}'...")
 
     response = requests.delete(
-        f"http://{remote}:5000/ota/{filename}", params=dict(sparkle=sparkle)
+        f"http://{remote}:5000/ota/{filename}", params=dict(sparkle=sparkle, noop="yes" if noop else "no")
     )
 
     print(
@@ -162,19 +163,20 @@ def delete_remote_file(remote, glitter, filename):
         raise RuntimeError("non-200 response code")
 
 
-def push_remote_file(remote, glitter, filename, file_contents=None):
+def push_remote_file(remote, glitter, filename, file_contents=None, noop=False):
 
     if not file_contents:
         with open(filename, "rb") as f:
             file_contents = f.read()
 
-    sparkle = make_sparkle(glitter, filename.encode("ascii") + b" " + file_contents)
+    noop_prefix = b"--noop " if noop else b""
+    sparkle = make_sparkle(glitter, noop_prefix + filename.encode("ascii") + b" " + file_contents)
 
     print(f"  pushing file '{filename}'...")
 
     response = requests.put(
         f"http://{remote}:5000/ota/{filename}",
-        params=dict(sparkle=sparkle),
+        params=dict(sparkle=sparkle, noop="yes" if noop else "no"),
         data=file_contents,
     )
 
@@ -306,14 +308,17 @@ if __name__ == "__main__":
 
         if new_sha1 == "--":
             # this file has been removed, delete it
-            delete_remote_file(device, glitter, filename)
+            delete_remote_file(device, glitter, filename, noop=args.noop)
 
         else:
-            push_remote_file(device, glitter, filename, file_contents=new_file_contents)
+            push_remote_file(device, glitter, filename, file_contents=new_file_contents, noop=args.noop)
             pass
 
     if not made_changes:
         print("nothing to do!")
+
+    elif args.noop:
+        print("no-op run, skipping reboot")
 
     elif args.no_reboot:
         print("all files synced, skipping reboot")
