@@ -69,7 +69,7 @@ def parse_file_listing(raw_listing):
 
     line_re = re.compile(r"([0-9a-zA-Z_.]+) ([0-9a-f]{40})")
 
-    files = set()
+    files = {}
     file_lines = raw_listing.split("\n")
 
     for line in file_lines:
@@ -81,7 +81,7 @@ def parse_file_listing(raw_listing):
         filename = match_result.group(1)
         checksum = match_result.group(2)
 
-        files.add((filename, checksum))
+        files[filename] = checksum
 
     return files
 
@@ -106,7 +106,7 @@ def git_blob_hash(data):
 
 def get_local_file_listing(config_py):
 
-    local_files = set()
+    local_files = {}
     repo = git.Repo()
 
     with open("deploy-listing") as f:
@@ -124,7 +124,7 @@ def get_local_file_listing(config_py):
                 # git's object database
                 checksum = repo.git.hash_object(filename, w=True)
 
-            local_files.add((filename, checksum))
+            local_files[filename] = checksum
 
     return local_files
 
@@ -188,40 +188,64 @@ if __name__ == "__main__":
     remote_files = get_remote_file_listing(device)
     local_files = get_local_file_listing(config_py)
 
-    remote_file_names = set(filename for filename, _ in remote_files)
-    local_file_names = set(filename for filename, _ in local_files)
-    delete_these_files = remote_file_names - local_file_names
-
-    # note that since these sets include both filenames and hashes,
-    # removing everything that's in remote_files will only remove
-    # files where the hashes match, leaving both new and changed
-    # files.
-    update_these_files = set(filename for filename, _ in (local_files - remote_files))
-
-    print(f"files to delete: {len(delete_these_files)}")
-    print(f"files to push: {len(update_these_files)}")
-    print()
+    all_file_names = set(remote_files.keys()) | set(local_files.keys())
 
     #with open("config.py") as f:
     #    contents = f.read()
     #print("\n".join(difflib.unified_diff(contents.split("\n"), config_py.decode("ascii").split("\n"), fromfile="present", tofile="target")))
 
-    for filename in delete_these_files:
-        print(f"file {filename} will be removed.")
-        delete_remote_file(device, glitter, filename)
+    repo = git.Repo()
+
+    for filename in all_file_names:
+
+        print(f"File {filename}:")
+
+        old_sha1 = remote_files.get(filename, "--")
+        new_sha1 = local_files.get(filename, "--")
+
+        print(f"  old: {old_sha1}")
+        print(f"  new: {new_sha1}")
         print()
 
-    for filename in update_these_files:
+        if new_sha1 == old_sha1:
+            continue
 
-        if filename in remote_file_names:
-            print(f"file {filename} is being updated.")
-        else:
-            print(f"file {filename} is new.")
+        if new_sha1 != "--":
 
-        if filename == "config.py":
-            push_remote_file(device, glitter, filename, file_contents=config_py)
+            if filename == "config.py":
+                new_file_contents = config_py
+
+            else:
+                with open(filename) as f:
+                    new_file_contents = f.read()
+
+        if old_sha1 != "--" and new_sha1 != "--":
+
+            try:
+                old_file_contents = repo.git.cat_file("blob", sha1)
+            except:
+                old_file_contents = None
+
+            if old_file_contents:
+                for line in difflib.unified_diff(
+                        old_file_contents.splitlines(keepends=True),
+                        new_file_contents.splitlines(keepends=True),
+                        fromfile="old", tofile="new"):
+
+                    print("  " + line)
+
+            else:
+                print(" (no diff available)")
+
+            print()
+
+        if new_sha1 == "--":
+            # this file has been removed, delete it
+            print("would delete file")
+            #delete_remote_file(device, glitter, filename)
+
         else:
-            push_remote_file(device, glitter, filename)
-        print()
+            print("would push file")
+            #push_remote_file(device, glitter, filename, file_contents=new_file_contents)
 
     print("all good.")
