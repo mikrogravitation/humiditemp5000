@@ -138,7 +138,7 @@ def delete_remote_file(remote, glitter, filename):
     )
 
     print(
-        f"deleting file {filename}: {response.status_code} {response.reason}: {response.text}"
+        f"  => deleting file {filename}: {response.status_code} {response.reason}: {response.text}"
     )
 
     if response.status_code != 200:
@@ -160,7 +160,7 @@ def push_remote_file(remote, glitter, filename, file_contents=None):
     )
 
     print(
-        f"pushing file {filename}: {response.status_code} {response.reason}: {response.text}"
+        f"  => pushing file {filename}: {response.status_code} {response.reason}: {response.text}"
     )
 
     if response.status_code != 200:
@@ -198,17 +198,17 @@ if __name__ == "__main__":
 
     for filename in all_file_names:
 
-        print(f"File {filename}:")
-
         old_sha1 = remote_files.get(filename, "--")
         new_sha1 = local_files.get(filename, "--")
+
+        if new_sha1 == old_sha1:
+            continue
+
+        print(f"File {filename}:")
 
         print(f"  old: {old_sha1}")
         print(f"  new: {new_sha1}")
         print()
-
-        if new_sha1 == old_sha1:
-            continue
 
         if new_sha1 != "--":
 
@@ -216,36 +216,42 @@ if __name__ == "__main__":
                 new_file_contents = config_py
 
             else:
-                with open(filename) as f:
+                with open(filename, "rb") as f:
                     new_file_contents = f.read()
 
         if old_sha1 != "--" and new_sha1 != "--":
 
             try:
-                old_file_contents = repo.git.cat_file("blob", sha1)
+                old_file_contents = repo.git.cat_file("blob", old_sha1)
             except:
                 old_file_contents = None
 
             if old_file_contents:
+                longest_line = 0
+                print("    ┌─────────")
                 for line in difflib.unified_diff(
-                        old_file_contents.splitlines(keepends=True),
-                        new_file_contents.splitlines(keepends=True),
-                        fromfile="old", tofile="new"):
+                        old_file_contents.splitlines(),
+                        new_file_contents.decode("utf-8").splitlines(),
+                        fromfile="old", tofile="new",
+                        lineterm=""):
 
-                    print("  " + line)
+                    longest_line = max(longest_line, len(line))
+                    print("    │ " + line)
+                print("    └" + "─" * (longest_line + 2))
 
             else:
-                print(" (no diff available)")
+                print("  (no diff available)")
 
             print()
 
         if new_sha1 == "--":
             # this file has been removed, delete it
-            print("would delete file")
-            #delete_remote_file(device, glitter, filename)
+            delete_remote_file(device, glitter, filename)
 
         else:
-            print("would push file")
             #push_remote_file(device, glitter, filename, file_contents=new_file_contents)
+            pass
+
+        print()
 
     print("all good.")
