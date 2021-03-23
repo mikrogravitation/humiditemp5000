@@ -3,14 +3,15 @@ import sys
 import json
 import binascii
 import hmac
+import yaml
 
-with open("glitter.json") as f:
-    ota_keys = json.load(f)
+with open("devices.yaml") as f:
+    devices = yaml.safe_load(f)
 
 device = sys.argv[1]
 filename = sys.argv[2]
 
-key = binascii.unhexlify(ota_keys[device])
+key = binascii.unhexlify(devices[device]["glitter"])
 
 with open(filename, "rb") as f:
     file_contents = f.read()

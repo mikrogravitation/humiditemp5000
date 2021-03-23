@@ -17,7 +17,6 @@ from dht22_sensor import DHT22Sensor
 from mhz19_sensor import MHZ19Sensor
 from sds011_sensor import SDS011Sensor
 
-
 from config import sensor_configs, hostname
 
 class GrayLogger:

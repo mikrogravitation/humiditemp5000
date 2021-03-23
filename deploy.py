@@ -133,13 +133,16 @@ def delete_remote_file(remote, glitter, filename):
 
     sparkle = make_sparkle(glitter, filename.encode("ascii"))
 
+    print(f"  deleting file '{filename}'...")
+
     response = requests.delete(
         f"http://{remote}:5000/ota/{filename}", params=dict(sparkle=sparkle)
     )
 
     print(
-        f"  => deleting file {filename}: {response.status_code} {response.reason}: {response.text}"
+        f"   => {response.status_code} {response.reason}: {response.text}"
     )
+    print()
 
     if response.status_code != 200:
         raise RuntimeError("non-200 response code")
@@ -153,6 +156,8 @@ def push_remote_file(remote, glitter, filename, file_contents=None):
 
     sparkle = make_sparkle(glitter, filename.encode("ascii") + b" " + file_contents)
 
+    print(f"  pushing file '{filename}'...")
+
     response = requests.put(
         f"http://{remote}:5000/ota/{filename}",
         params=dict(sparkle=sparkle),
@@ -160,11 +165,32 @@ def push_remote_file(remote, glitter, filename, file_contents=None):
     )
 
     print(
-        f"  => pushing file {filename}: {response.status_code} {response.reason}: {response.text}"
+        f"   => {response.status_code} {response.reason}: {response.text}"
     )
+    print()
 
     if response.status_code != 200:
         raise RuntimeError("non-200 response code")
+
+
+def get_remote_file(remote, filename):
+
+    print(f"  getting file '{filename}'...")
+
+    response = requests.get(f"http://{remote}:5000/ota/{filename}")
+
+    if response.status_code != 200:
+        print(
+            f"   => {response.status_code} {response.reason}: {response.text}"
+        )
+        print()
+        raise RuntimeError("non-200 response code")
+
+    else:
+        print(f"   => {response.status_code} {response.reason}") 
+        print()
+
+    return response.text
 
 
 if __name__ == "__main__":
@@ -222,7 +248,10 @@ if __name__ == "__main__":
         if old_sha1 != "--" and new_sha1 != "--":
 
             try:
-                old_file_contents = repo.git.cat_file("blob", old_sha1)
+                if filename == "config.py":
+                    old_file_contents = get_remote_file(device, "config.py")
+                else:
+                    old_file_contents = repo.git.cat_file("blob", old_sha1)
             except:
                 old_file_contents = None
 
@@ -249,9 +278,7 @@ if __name__ == "__main__":
             delete_remote_file(device, glitter, filename)
 
         else:
-            #push_remote_file(device, glitter, filename, file_contents=new_file_contents)
+            push_remote_file(device, glitter, filename, file_contents=new_file_contents)
             pass
-
-        print()
 
     print("all good.")
