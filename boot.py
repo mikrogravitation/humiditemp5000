@@ -5,7 +5,7 @@ import machine
 import uos
 import usys
 import gc
-import time
+import utime
 import ure
 import hashlib
 from sparkle import Sparkle
@@ -73,7 +73,7 @@ try:
     print("before sleep")
 
     # wait for dht sensor to stabilize
-    time.sleep(2)
+    utime.sleep(2)
 
     # initialize sensor objects
     sensors = {}
@@ -102,10 +102,13 @@ try:
     listener.bind(("0.0.0.0", 5000))
     listener.listen(1)
 
+    last_connection_duration = 0
+
     while True:
         connection = None
         try:
             connection, peer = listener.accept()
+            connection_start = utime.ticks_ms()
             request = connection.recv(400)
 
             print(request)
@@ -138,10 +141,12 @@ try:
 # TYPE wifi_rssi gauge
 # TYPE memory_used gauge
 # TYPE memory_free gauge
+# TYPE last_connection_duration_ms gauge
 wifi_rssi {}
 memory_used {}
 memory_free {}
-                """.format(wlan.status("rssi"), gc.mem_alloc(), gc.mem_free())
+last_connection_duration_ms {}
+                """.format(wlan.status("rssi"), gc.mem_alloc(), gc.mem_free(), last_connection_duration)
 
                 connection.send("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/plain; version=0.0.4\r\n\r\n".format(len(response_body)) + response_body)
 
@@ -345,6 +350,8 @@ memory_free {}
                     response_body = "sorry, but we couldn't find that location :/"
                     connection.send("HTTP/1.1 404 not found\r\nContent-Length: {}\r\n\r\n".format(len(response_body)) + response_body)
 
+            last_connection_duration = utime.ticks_ms() - connection_start
+
         except KeyboardInterrupt as e:
             raise e
 
@@ -356,6 +363,7 @@ memory_free {}
         finally:
             if connection:
                 connection.close()
+                gc.collect() # try to smoothe out memory spikes
 
 except Exception as e:
     buf = uio.StringIO()

@@ -1,3 +1,5 @@
+add a watchdog and fallback mode
+figure out why it sometimes doesn't come back up after rebooting (not even a message in graylog)
 clean up http server implementation (including query parsing)
 bootstrapping script
 timestamping for sparkle (replay protection)
